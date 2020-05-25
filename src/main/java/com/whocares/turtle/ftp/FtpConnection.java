@@ -4,9 +4,10 @@ import java.io.*;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.text.SimpleDateFormat;
+import java.time.format.DateTimeFormatter;
+import java.util.Date;
+import java.util.Locale;
 
 public class FtpConnection implements Runnable {
 
@@ -14,7 +15,7 @@ public class FtpConnection implements Runnable {
     private FtpServer ftpServer;
     private ServerSocket dataSocket;
     private String user, pwd;
-    private String dierctory = "D:\\workspace\\go\\src";
+    private String directory = "/Users/lingyiqun/workspace/FTPServer";
 
     private enum UserStatus {
         NOTLOGGEDIN, PRINTEDUSERNAME, LOGGEDIN
@@ -109,8 +110,32 @@ public class FtpConnection implements Runnable {
                             bw.write("425 No data connection was established\n");
                         } else {
 
-                        }
+                            bw.write("150 Here comes the directory listing.\n");
+                            bw.flush();
+                            BufferedWriter dataBw = new BufferedWriter(
+                                    new OutputStreamWriter(dataConnection.getOutputStream()));
 
+                            File file = new File(directory);
+                            File[] files = file.listFiles();
+
+                            System.out.println("Start Send file info");
+                            for (File f : files) {
+                                long lastModified = f.lastModified();
+                                Date date = new Date(lastModified);
+                                if(!f.isDirectory()) {
+                                    SimpleDateFormat dateFormat = new SimpleDateFormat("MMM d yyyy", new Locale("en"));
+                                    String resp = "-rw-r--r-- 1 0 0" + f.length()+" "+dateFormat.format(date)+" "+f.getName()+"\r\n";
+                                    System.out.println("Send "+ resp);
+                                    dataBw.write(resp);
+                                }
+                            }
+                            dataBw.flush();
+                            System.out.println("Send file info complete");
+                            dataConnection.close();
+                            bw.write("226 Directory send OK.\n");
+                        }
+                        break;
+                    case "":
                     default:
                         bw.write("500 Unknown Command.\n");
                 }
