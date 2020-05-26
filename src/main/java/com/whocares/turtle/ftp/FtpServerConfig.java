@@ -4,11 +4,28 @@ public class FtpServerConfig {
     private String HomePath;
     private int port, dataPort;
 
+    public String getDataDir() {
+        return dataDir;
+    }
+
+    public void setDataDir(String dataDir) {
+        this.dataDir = dataDir;
+    }
+
+    private String dataDir;
+
+    FtpServerConfig(String homePath, int port, int dataPort, String dataDir){
+        this.HomePath = homePath;
+        this.port = port;
+        this.dataPort = dataPort;
+        this.dataDir = dataDir;
+    }
 
     FtpServerConfig(String path, int port, int dataPort){
         this.HomePath = path;
         this.port = port;
         this.dataPort = dataPort;
+        this.dataDir = System.getProperty("user.dir");
     }
 
     public String getHomePath() {

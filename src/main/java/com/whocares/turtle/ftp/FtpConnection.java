@@ -5,7 +5,6 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.text.SimpleDateFormat;
-import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.Locale;
 
@@ -15,14 +14,15 @@ public class FtpConnection implements Runnable {
     private FtpServer ftpServer;
     private ServerSocket dataSocket;
     private String user, pwd;
-    private String directory = "/Users/lingyiqun/workspace/FTPServer";
+    private String directory = "/";
 
     private enum UserStatus {
         NOTLOGGEDIN, PRINTEDUSERNAME, LOGGEDIN
     }
     private UserStatus userStatus = UserStatus.NOTLOGGEDIN;
+
     private enum TransferType {
-        ASCII
+        ASCII, BINARY
     }
     private TransferType transferType = TransferType.ASCII;
 
@@ -79,11 +79,15 @@ public class FtpConnection implements Runnable {
                         if (args.toUpperCase().equals("A")) {
                             transferType = TransferType.ASCII;
                             bw.write("200 OK\n");
+                        } else if(args.toUpperCase().equals("I")){
+                            transferType = TransferType.BINARY;
+                            bw.write("200 OK\n");
                         } else {
                             bw.write("504 Not OK\n");
                         }
                         break;
                     case "QUIT":
+                        bw.write("221 Good bye.\n");
                         socket.close();
                         return;
                     case "PORT":
@@ -115,16 +119,20 @@ public class FtpConnection implements Runnable {
                             BufferedWriter dataBw = new BufferedWriter(
                                     new OutputStreamWriter(dataConnection.getOutputStream()));
 
-                            File file = new File(directory);
+                            File file = new File(this.ftpServer.getConfig().getDataDir(), directory);
                             File[] files = file.listFiles();
 
                             System.out.println("Start Send file info");
                             for (File f : files) {
                                 long lastModified = f.lastModified();
                                 Date date = new Date(lastModified);
+                                SimpleDateFormat dateFormat = new SimpleDateFormat("MMM d yyyy", new Locale("en"));
                                 if(!f.isDirectory()) {
-                                    SimpleDateFormat dateFormat = new SimpleDateFormat("MMM d yyyy", new Locale("en"));
                                     String resp = "-rw-r--r-- 1 0 0" + f.length()+" "+dateFormat.format(date)+" "+f.getName()+"\r\n";
+                                    System.out.println("Send "+ resp);
+                                    dataBw.write(resp);
+                                }else{
+                                    String resp = "drwxr-xr-x " + f.list().length +  " 0 0 " + f.length()+" "+dateFormat.format(date)+" "+f.getName()+"\r\n";
                                     System.out.println("Send "+ resp);
                                     dataBw.write(resp);
                                 }
@@ -135,7 +143,139 @@ public class FtpConnection implements Runnable {
                             bw.write("226 Directory send OK.\n");
                         }
                         break;
-                    case "":
+                    case "RETR":
+                        File file = new File(this.ftpServer.getConfig().getDataDir() + File.separator + this.directory + File.separator + messArr[1]);
+
+                        if (!file.exists()) {
+                            bw.write("550 File does not exist.");
+                        }
+                        // transerfer mode
+                        if (transferType == TransferType.ASCII) {
+                            bw.write("150 Opening ASCII mode data connection for requested file " + file.getName() + ".\n");
+                            bw.flush();
+
+                            BufferedReader dataBr = null;
+                            PrintWriter dataPw = null;
+
+                            try {
+                                dataBr = new BufferedReader(new FileReader(file));
+                                dataPw = new PrintWriter(dataConnection.getOutputStream());
+
+                                String s;
+                                while ((s = dataBr.readLine()) != null ) {
+                                    dataPw.println(s);
+                                }
+
+                                dataBr.close();
+                                dataPw.close();
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        } else if (transferType == TransferType.BINARY) {
+                            bw.write("150 Opening Binary mode data connection for requested file " + file.getName()+".\n");
+                            bw.flush();
+                            BufferedInputStream dataIn = null;
+                            BufferedOutputStream dataOut = null;
+
+                            try {
+                                dataIn = new BufferedInputStream(new FileInputStream(file));
+                                dataOut = new BufferedOutputStream(dataConnection.getOutputStream());
+
+                                byte[] buffer = new byte[1024];
+                                int len = 0;
+                                while ((len = dataIn.read(buffer, 0, 1024)) != -1) {
+                                    dataOut.write(buffer, 0, len);
+                                }
+                                dataIn.close();
+                                dataOut.close();
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                        bw.write("226 File transfer successful. Closing data connection.\n");
+                        bw.flush();
+                        dataConnection.close();
+                        break;
+                    // 上传文件
+                    case "STOR":
+                        if (messArr[1] == null) {
+                            bw.write("501 No filename given.\n");
+                        } else {
+                            File file1 = new File(this.ftpServer.getConfig().getDataDir() + File.separator + directory + File.separator + messArr[1]);
+                            if (file1.exists()) {
+                                bw.write("550 File already exists.\n");
+                            } else {
+                                if (transferType == TransferType.ASCII) {
+                                    bw.write("150 Opening ASCII mode data connection for requested file " + file1.getName() + ".\n");
+                                    bw.flush();
+                                    BufferedReader dataBr = null;
+                                    PrintWriter dataPw = null;
+                                    try {
+                                        dataBr = new BufferedReader(new InputStreamReader(dataConnection.getInputStream()));
+                                        dataPw = new PrintWriter(new FileOutputStream(file1));
+
+                                        String s;
+                                        while ((s = dataBr.readLine()) != null) {
+                                            dataPw.println(s);
+                                        }
+
+                                        dataBr.close();
+                                        dataPw.close();
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+                                } else {
+                                    bw.write("150 Opening Binary mode data connection for requested file " + file1.getName() + ".\n");
+                                    bw.flush();
+
+                                    BufferedInputStream dataIn = null;
+                                    BufferedOutputStream dataOut = null;
+                                    try {
+                                       dataIn = new BufferedInputStream(dataConnection.getInputStream());
+                                       dataOut = new BufferedOutputStream(new FileOutputStream(file1));
+
+                                       byte[] buffer = new byte[1024];
+                                       int len = 0;
+                                       while ((len = dataIn.read(buffer, 0, 1024)) != -1) {
+                                           dataOut.write(buffer, 0, len);
+                                       }
+                                       dataOut.flush();
+                                       dataOut.close();
+                                       System.out.println("write file complete");
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+                                }
+                                bw.write("226 File transfer successful. Closing data connection.\n");
+                                bw.flush();
+                                dataConnection.close();
+                            }
+                        }
+                        break;
+                    case "PWD":
+                        bw.write("257 \"" + directory + "\" is the current directory.\n");
+                        break;
+                    case "CWD":
+                        String datadir = this.ftpServer.getConfig().getDataDir() + File.separator;
+                        String mappedDir = directory;
+                        String dir = messArr[1];
+                        if (dir.equals("..")) {
+                            int end = mappedDir.lastIndexOf(File.separator);
+                            if (end > 0) {
+                                mappedDir = mappedDir.substring(0, end);
+                            }
+                        } else if (!dir.equals(".")) {
+                            mappedDir = mappedDir + File.separator + dir;
+                        }
+                        File f = new File(datadir + mappedDir);
+                        if (f.exists() && f.isDirectory() && (mappedDir.length() >= directory.length())) {
+                            directory = mappedDir;
+                            bw.write("250 Directory successfully changed.\n");
+                        } else {
+                            bw.write("550 Requested action not taken. File unavailable.\n");
+                        }
+                        bw.flush();
+                        break;
                     default:
                         bw.write("500 Unknown Command.\n");
                 }
